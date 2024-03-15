@@ -1,0 +1,67 @@
+[tool.poetry]
+name = "telegram_parser"
+version = "0.1.0"
+description = ""
+authors = ["VoVcHiC"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+pyrogram = "^2.0.106"
+tgcrypto = "^1.2.5"
+pydantic-settings = "^2.2.1"
+gspread-asyncio = "^2.0.0"
+apscheduler = "^3.10.4"
+
+[tool.ruff]
+line-length = 88
+indent-width = 4
+target-version = "py312"
+
+[tool.ruff.lint]
+ignore = [
+    "ANN101",
+    "ANN102",
+    "D100",
+    "D103",
+    "D104",
+    "D106",
+    "D107",
+    "D203",
+    "D205",
+    "D212",
+    "D400",
+    "D415",
+    "COM812",
+    "RUF001",
+    "RUF002",
+    "RUF003",
+    "PLR0913",
+    "PLR2004",
+    "PD011",
+    "S101",
+]
+select = ["ALL"]
+fixable = ["ALL"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-line-length = "dynamic"
+
+[[tool.mypy.overrides]]
+module = "*.*"
+disable_error_code = [
+    "call-arg",
+    "import-not-found",
+    "import-untyped",
+    "union-attr",
+]
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.2.2"
+mypy = "^1.8.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
