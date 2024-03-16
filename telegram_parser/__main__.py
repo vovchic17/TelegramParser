@@ -6,8 +6,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from config_reader import config
 from pyrogram import Client
 from pyrogram.methods.utilities.idle import idle
-
-from .telegram_parser import TelegramParser
+from telegram_parse import TelegramParser
 
 
 async def main() -> None:
