@@ -12,7 +12,12 @@ from telegram_parse import TelegramParser
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
     client = Client("my_account", config.API_ID, config.API_HASH)
-    tp = TelegramParser(config.SPREADSHEET_KEY, client)
+    tp = TelegramParser(
+        config.SPREADSHEET_KEY,
+        client,
+        config.CHUNK_SIZE,
+        config.GOOGLE_SHEETS_API_CREDS,
+    )
     await tp.initizlize()
     scheduler = AsyncIOScheduler()
     scheduler.add_job(tp.update_sheets, IntervalTrigger(seconds=5))

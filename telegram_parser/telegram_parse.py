@@ -3,7 +3,6 @@ from contextlib import suppress
 from datetime import timedelta, timezone
 from typing import TYPE_CHECKING
 
-from config_reader import config
 from google.oauth2.service_account import Credentials
 from gspread.exceptions import APIError
 from gspread.utils import ValueInputOption
@@ -22,19 +21,25 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+logger = logging.getLogger(__name__)
+
 
 class TelegramParser:
     """Telegram parser class"""
 
-    def __init__(self, spreadsheet_key: str, client: "Client") -> None:
+    def __init__(
+        self, spreadsheet_key: str, client: "Client", chunk_size: int, creds_path: str
+    ) -> None:
         self.tz = timezone(timedelta(hours=3))
         self.spreadsheet_key = spreadsheet_key
         self.agcm = AsyncioGspreadClientManager(self.__get_creds)
         self.client = client
+        self.chunk_size = chunk_size
+        self.creds_path = creds_path
         self.busy = False
 
     def __get_creds(self) -> Credentials:
-        creds = Credentials.from_service_account_file(config.GOOGLE_SHEETS_API_CREDS)
+        creds = Credentials.from_service_account_file(self.creds_path)
         return creds.with_scopes(["https://www.googleapis.com/auth/drive"])
 
     async def initizlize(self) -> None:
@@ -46,6 +51,33 @@ class TelegramParser:
             await self.client.start()
         self.client.add_handler(MessageHandler(self.feed_message))
 
+    async def pre_format(self, worksheet: "AsyncioGspreadWorksheet") -> None:
+        """Preformat worksheet"""
+        with suppress(APIError):
+            await worksheet.delete_columns(5, 50)
+        await worksheet.update(
+            [["Ссылка", "Дата", "Отправитель", "Текст"]], "A1:D1", nowait=True
+        )
+
+    def get_sender(self, message: "Message", chat: str) -> str:
+        """Get formatted sender name"""
+        if message.chat.type == ChatType.CHANNEL:
+            sender = f'=HYPERLINK("t.me/{chat}"; "@{chat}")'
+        elif message.from_user and message.from_user.username:
+            sender = (
+                f'=HYPERLINK("t.me/{message.from_user.username}"; '
+                f'"{message.from_user.first_name or ""} '
+                f'{message.from_user.last_name or ""}")'
+            )
+        elif message.from_user:
+            sender = (
+                f"{message.from_user.first_name or ''} "
+                f"{message.from_user.last_name or ''}"
+            )
+        else:
+            sender = ""
+        return sender
+
     async def update_sheets(self) -> None:
         """Update the worksheets"""
         if self.busy:
@@ -53,46 +85,43 @@ class TelegramParser:
         self.busy = True
         worksheets = await self.ss.worksheets()
         for worksheet in worksheets:
-            with suppress(APIError):
-                await worksheet.delete_columns(5, 50)
+            await self.pre_format(worksheet)
             values = await worksheet.get_all_values()
-            if not values[0]:
-                await worksheet.insert_row(["Ссылка", "Дата", "Отправитель", "Текст"])
             chat = worksheet.title.lstrip("@")
-            if len(values) == 1:
-                if chat.lstrip("-").isnumeric():
-                    chat = int(chat)
-                try:
-                    async for message in self.client.get_chat_history(chat):
-                        if message and not message.service:
-                            await worksheet.append_rows(
-                                [
-                                    [
-                                        message.link,
-                                        message.date.replace(tzinfo=self.tz).strftime(
-                                            "%H:%M %d.%m.%Y"
-                                        ),
-                                        f'=HYPERLINK("t.me/{chat}"; "@{chat}")'
-                                        if message.chat.type == ChatType.CHANNEL
-                                        else f'=HYPERLINK("t.me/'
-                                        f'{message.from_user.username}";'
-                                        f'"{message.from_user.first_name or ""} '
-                                        f'{message.from_user.last_name or ""}")'
-                                        if message.from_user
-                                        and message.from_user.username
-                                        else f"{message.from_user.first_name or ""} "
-                                        f"{message.from_user.last_name or ""}"
-                                        if message.from_user
-                                        else "",
-                                        message.text or message.caption,
-                                    ]
-                                ],
-                                ValueInputOption.user_entered,
-                                nowait=True,
-                            )
-                    self.worksheets[chat] = worksheet
-                except (UsernameNotOccupied, PeerIdInvalid):
-                    logger.info("Chat %s not found", chat)
+            # Worksheet should only contain header
+            # to be filled with message history
+            if len(values) != 1:
+                continue
+            if chat.lstrip("-").isnumeric():
+                chat = int(chat)
+            rows = []
+            try:
+                async for message in self.client.get_chat_history(chat):
+                    if not message or message.service:
+                        continue
+
+                    rows.append(
+                        [
+                            message.link,
+                            message.date.replace(tzinfo=self.tz).strftime(
+                                "%H:%M %d.%m.%Y"
+                            ),
+                            self.get_sender(message, chat),
+                            "'" + (message.text or message.caption or ""),
+                        ]
+                    )
+
+                    if len(rows) == self.chunk_size:
+                        await worksheet.append_rows(rows, ValueInputOption.user_entered)
+                        rows = []
+
+                if rows:
+                    await worksheet.append_rows(rows, ValueInputOption.user_entered)
+                self.worksheets[chat] = worksheet
+
+            except (UsernameNotOccupied, PeerIdInvalid):
+                logger.info("Chat %s not found", chat)
+
         self.busy = False
 
     async def feed_message(self, _: "Client", message: "Message") -> None:
